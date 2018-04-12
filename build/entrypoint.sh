@@ -1,7 +1,7 @@
 #! /usr/bin/env bash
 set -e
 
-APP_NAME=flange
+APP_NAME=lydia
 
 # build the binary with a certain version
 build() {
