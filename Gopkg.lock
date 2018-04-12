@@ -2,10 +2,40 @@
 
 
 [[projects]]
+  name = "github.com/dgrijalva/jwt-go"
+  packages = ["."]
+  revision = "06ea1031745cb8b3dab3f6a236daf2b0aa468b7e"
+  version = "v3.2.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/evilwire/go-env"
   packages = ["."]
   revision = "ce47a9b9a91c4377100810b5c5e508c2c12856d8"
+
+[[projects]]
+  name = "github.com/labstack/echo"
+  packages = [".","middleware"]
+  revision = "a5d81b8d4a627f3f49dcb3164ef2bb5239682227"
+  version = "3.3.4"
+
+[[projects]]
+  name = "github.com/labstack/gommon"
+  packages = ["bytes","color","log","random"]
+  revision = "6fe1405d73ec4bd4cd8a4ac8e2a2b2bf95d03954"
+  version = "0.2.4"
+
+[[projects]]
+  name = "github.com/mattn/go-colorable"
+  packages = ["."]
+  revision = "167de6bfdfba052fa6b2d3664c8f5272e23c9072"
+  version = "v0.0.9"
+
+[[projects]]
+  name = "github.com/mattn/go-isatty"
+  packages = ["."]
+  revision = "0360b2af4f38e8d38c7fce2a9f4e702702d73a39"
+  version = "v0.0.3"
 
 [[projects]]
   name = "github.com/pkg/errors"
@@ -13,9 +43,33 @@
   revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
   version = "v0.8.0"
 
+[[projects]]
+  branch = "master"
+  name = "github.com/valyala/bytebufferpool"
+  packages = ["."]
+  revision = "e746df99fe4a3986f4d4f79e13c1e0117ce9c2f7"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/valyala/fasttemplate"
+  packages = ["."]
+  revision = "dcecefd839c4193db0d35b88ec65b4c12d360ab0"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/crypto"
+  packages = ["acme","acme/autocert"]
+  revision = "d6449816ce06963d9d136eee5a56fca5b0616e7e"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/sys"
+  packages = ["unix"]
+  revision = "3b87a42e500a6dc65dae1a55d0b641295971163e"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "2a7a0b7180bd05a3b6b124f5612fbda396f630a5370834ebaf9df23161c167a2"
+  inputs-digest = "1232ce2ef43cf64907e6969b9cea8559240027ca732a124db97553075ee2dfda"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -1,29 +1,19 @@
 package main
 
 import (
-	"github.com/pkg/errors"
-	"time"
 	"github.com/evilwire/go-env"
+	"github.com/sonaak/lydia/app"
 )
 
-type App struct {}
 
-
-func (app *App) Run() error {
-	for {
-		time.Sleep(1 * time.Second)
-	}
-	return errors.New("Broken")
-}
-
-
-func MustSetup(env goenv.EnvReader) *App {
-	return &App{}
-}
 
 func main() {
 	env := goenv.NewOsEnvReader()
-	app := MustSetup(env)
 
-	panic(app.Run())
+	application, err := app.NewApp(env)
+	if err != nil {
+		panic(err)
+	}
+
+	panic(application.Run())
 }
