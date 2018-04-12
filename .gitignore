@@ -22,3 +22,8 @@
 # Terraform
 .terraform/
 *.tfstate
+
+# Build setup
+build/*
+!build/Dockerfile
+!build/entrypoint.sh
