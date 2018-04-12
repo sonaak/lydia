@@ -1,0 +1,399 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        maven {
+            url 'http://dl.bintray.com/vermeulen-mp/gradle-plugins'
+        }
+    }
+
+    dependencies {
+        classpath 'org.ajoberstar:grgit:2.1.0'
+    }
+}
+
+plugins {
+    id 'org.ajoberstar.grgit' version '2.1.0'
+}
+
+import groovy.json.JsonSlurper
+
+def appName = "lydia"
+def codeImage = "sonaak/lydia-code"
+def binaryImage = "sonaak/lydia"
+
+def awsDockerCommand(String imageName, Map envVars, List params, List subcommands) {
+    def runCommand = [
+            'docker', 'run',
+    ]
+
+    def awsCredEnvFile = "${System.getProperty("user.home")}/.aws/${accountId}.env"
+    if (file(awsCredEnvFile).exists()) {
+        runCommand += ["--env-file", awsCredEnvFile]
+    }
+
+    for (pair in envVars) {
+        runCommand += ["-e", "${pair.key}=${pair.value}"]
+    }
+
+    return runCommand + [
+            // environment
+            "-e", "ENVIRONMENT=${env}"
+    ] + params +
+            [
+                    // mounting the current directory to retrieve the test results
+                    imageName
+            ] + subcommands
+}
+
+
+/**
+ * Builds the flange binary with the appropriate version.
+ */
+task buildImage {
+    FileTree inputFiles = fileTree(dir:".")
+    def version = file("VERSION").text.trim()
+    def shortHash = grgit.head().abbreviatedId
+
+    // include any go and manifest files
+    inputFiles.include("main.go")
+    inputFiles.include("**/*.go")
+    inputFiles.include("vendor/manifest")
+
+    // include any change to the build logic
+    inputFiles.include("build/Dockerfile")
+    inputFiles.include("build/entrypoint.sh")
+
+    inputs.files(inputFiles)
+    outputs.files("build/${shortHash}/docker-build.out")
+
+    doLast {
+
+        exec {
+            workingDir 'build'
+            commandLine 'mkdir', '-p', shortHash
+        }
+        exec {
+            workingDir '.'
+            commandLine "docker", "build",
+                    "--rm",
+                    "-f", "build/Dockerfile",
+                    "--build-arg", "VERSION=${version}",
+                    "--build-arg", "SHORTHASH=${shortHash}",
+                    "-t", "${codeImage}:${shortHash}", "."
+        }
+
+        // write the ID of the docker image to build/${version}/docker.out
+        // and rely on that being the unique image ID
+        exec {
+            standardOutput = new FileOutputStream("build/${shortHash}/docker-build.out")
+            commandLine "docker", "images", "--format", '{{.ID}}', "${codeImage}:${shortHash}"
+        }
+    }
+}
+
+task vet {
+    dependsOn = ["buildImage"]
+    def shortHash = grgit.head().abbreviatedId
+
+    doLast {
+        exec {
+            workingDir "."
+            commandLine "docker", "run", "${codeImage}:${shortHash}", 'vet'
+        }
+    }
+}
+
+
+task unitTest {
+    dependsOn = ["buildImage"]
+    def shortHash = grgit.head().abbreviatedId
+
+    doLast {
+        exec {
+            workingDir "."
+            commandLine "docker", "run", "${codeImage}:${shortHash}", 'test'
+        }
+    }
+}
+
+
+task binary {
+    dependsOn = ["buildImage"]
+    def shortHash = grgit.head().abbreviatedId
+    def uid = ["id", "-u", System.getProperty('user.name')].execute().text.trim()
+
+    inputs.files("build/${shortHash}/docker-build.out")
+    outputs.files("build/${shortHash}/${appName}")
+
+    doLast {
+        exec {
+            workingDir "."
+            commandLine "docker", "run",
+                    '-v', "${workingDir}/build:/go/out",
+                    '-e', "UID=${uid}",
+                    "${codeImage}:${shortHash}", 'build'
+        }
+    }
+}
+
+/**
+ * Build the docker image that captures the binary
+ */
+task build {
+    def version = file("VERSION").text.trim()
+    def shortHash = grgit.head().abbreviatedId
+
+    dependsOn = ["binary"]
+    inputs.files(["build/${shortHash}/${appName}", "Dockerfile"])
+    outputs.files("build/${shortHash}/docker.out")
+
+    doLast {
+        exec {
+            workingDir "."
+            commandLine "docker", "build",
+                    "--rm",
+                    '--build-arg', "VERSION=${version}",
+                    '--build-arg', "SHORTHASH=${shortHash}",
+                    '--build-arg', "BUILD_TIME=${new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'")}",
+                    '--build-arg', "GHASH=${grgit.head().id}",
+                    '--build-arg', "PACKER=${System.getProperty('user.name')}",
+                    "-t", "${binaryImage}:${shortHash}",
+                    "."
+        }
+
+        // write the ID of the docker image to build/${version}/docker.out
+        // and rely on that being the unique image ID
+        exec {
+            standardOutput = new FileOutputStream("build/${shortHash}/docker.out")
+
+            workingDir "."
+            commandLine "docker", "images", "--format", '{{.ID}}', "${binaryImage}:${shortHash}"
+        }
+
+        exec {
+            commandLine 'docker', 'tag', "${binaryImage}:${shortHash}", "${binaryImage}:${version}"
+        }
+        exec {
+            commandLine 'docker', 'tag', "${binaryImage}:${shortHash}", "${binaryImage}:latest"
+        }
+    }
+}
+
+
+task run {
+    dependsOn = ["build"]
+    doLast {
+        exec {
+            commandLine 'docker-compose', 'up', '-d'
+        }
+    }
+}
+
+task stop {
+    doLast {
+        exec {
+            commandLine 'docker-compose', 'down'
+        }
+    }
+}
+
+
+task localTest {
+    dependsOn = ["doLogin"]
+
+    doLast {
+        println "Local Test: "
+    }
+}
+
+/**
+ * Publishes to Docker ECR with the Docker image that was just built.
+ */
+task publish {
+    dependsOn = ["build"]
+    def shortHash = grgit.head().abbreviatedId
+    def version = file("VERSION").text
+
+    print dockerUser
+    doLast {
+        exec {
+            commandLine 'docker', 'login',
+                    '-u', dockerUser, '-p', dockerPassword
+        }
+        exec {
+            commandLine "docker", "push", "${binaryImage}:${shortHash}"
+        }
+        exec {
+            commandLine "docker", "push", "${binaryImage}:${version}"
+        }
+        exec {
+            commandLine "docker", "push", "${binaryImage}:latest"
+        }
+    }
+}
+
+task componentTest {
+    dependsOn = ["doLogin"]
+
+    doLast {
+        // pull the system test docker image
+        exec {
+            commandLine 'docker', 'pull'
+
+        }
+    }
+}
+
+
+task incrementVersion {
+    doLast {
+        def versionFile = file("VERSION")
+        def versionTuple = versionFile.text.tokenize(".").collect({s -> s.toInteger()})
+        versionTuple[2] += 1
+        versionFile.text = versionTuple.join(".")
+    }
+}
+
+task integrateCode {
+    dependsOn = ['incrementVersion']
+    def version = file("VERSION").text
+
+    doLast {
+        grgit.add(patterns: ['VERSION'])
+        grgit.commit(message: "[Jenkins] increments version")
+
+        exec {
+            workingDir '.'
+            commandLine 'git', 'push', 'origin', 'HEAD:master'
+        }
+
+        def branchName = grgit.branch.current().getName()
+
+        // skip if branchName is master, since we have already
+        // pushed to master
+        if (branchName != "master") {
+            exec {
+                workingDir '.'
+                commandLine 'git', 'push', 'origin', "HEAD:${branchName}"
+            }
+        } else {
+            println "Branch is master. Skipping..."
+        }
+
+        grgit.tag.add(name: version)
+        exec {
+            workingDir '.'
+            commandLine 'git', 'push', 'origin', "${version}"
+        }
+        grgit.close()
+    }
+}
+
+task artifact {
+    dependsOn = ["build", "doLogin"]
+    def shortHash = grgit.head().abbreviatedId
+    def version = file("VERSION").text
+
+    doLast {
+        exec {
+            commandLine "docker", "tag", "${binaryImage}:${shortHash}", "${ecrContainerName}:${version}"
+        }
+        exec {
+            commandLine "docker", "push", "${ecrContainerName}:${version}"
+        }
+    }
+}
+
+/**
+ * Deploys against the target environment.
+ */
+def heathId
+task deploy {
+    def version = file("VERSION").text
+    def fullName="${env}-${subenv}-${appName}"
+    def deploymentId="${appName}-${version}"
+    def sipper = new JsonSlurper()
+    def heathStream = new ByteArrayOutputStream()
+    def awsOut = new ByteArrayOutputStream()
+
+    doLast {
+        exec {
+            standardOutput = heathStream;
+            commandLine 'docker', 'run', 'octane/heath',
+                    '--pre-deploy', '--who', 'Octane-Jenkins',
+                    '--service-name', appName,
+                    '--version', deploymentId,
+                    '--target', "aws/ecs/${fullName}",
+                    '--extra', "fix-version=${version}",
+                    '--extra', "short-version=${version}"
+        }
+        heathId = sipper.parseText(heathStream.toString()).id
+
+        exec {
+            workingDir '.'
+            commandLine awsDockerCommand("octane/terraform:${tfVersion}",
+                    [
+                            "APP_NAME": appName,
+                            "VERSION": version,
+                            'REMOTE_STATE_BUCKET': stateBucket,
+                            'AWS_ACCOUNT_ID': accountId,
+                            'AWS_REGION': region
+                    ],
+                    ['-v', "${System.getProperty("user.dir")}/infrastructure:/terraform/infrastructure"],
+                    ['deploy', env, subenv]
+            )
+        }
+    }
+}
+
+gradle.taskGraph.afterTask { Task task, TaskState state ->
+    if(task.name == 'deploy') {
+        if(state.failure) {
+            exec {
+                commandLine 'docker', 'run', 'octane/heath',
+                        '--post-deploy',
+                        '--deployment-id', heathId,
+                        '--status', "no cigar"
+            }
+        }else {
+            exec{
+                commandLine 'docker', 'run', 'octane/heath',
+                        '--post-deploy',
+                        '--deployment-id', heathId,
+                        '--status', "success"
+            }
+        }
+    }
+}
+
+task destroy {
+    def version = file("VERSION").text
+    doLast {
+        exec {
+            standardOutput = heathStream;
+            commandLine 'docker', 'run', 'octane/heath',
+                    '--pre-deploy', '--who', 'Octane-Jenkins',
+                    '--service-name', appName,
+                    '--version', deploymentId,
+                    '--target', "aws/ecs/${fullName}",
+                    '--extra', "fix-version=${version}",
+                    '--extra', "short-version=${version}"
+        }
+        heathId = sipper.parseText(heathStream.toString()).id
+
+        exec {
+            workingDir '.'
+            commandLine awsDockerCommand("octane/terraform:${tfVersion}",
+                    [
+                            "APP_NAME": appName,
+                            "VERSION": version,
+                            'REMOTE_STATE_BUCKET': stateBucket,
+                            'AWS_ACCOUNT_ID': accountId,
+                            'AWS_REGION': region
+                    ],
+                    ['-v', "${System.getProperty("user.dir")}/infrastructure:/terraform/infrastructure"],
+                    ['destroy', env, subenv]
+            )
+        }
+    }
+}
