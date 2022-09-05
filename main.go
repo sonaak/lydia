@@ -1,23 +1,11 @@
+/*
+Copyright © 2022 NAME HERE <EMAIL ADDRESS>
+
+*/
 package main
 
-import (
-	"github.com/evilwire/go-env"
-	"github.com/sonaak/lydia/app"
-	"golang.org/x/oauth2"
-	"github.com/google/go-github/github"
-)
-
-
+import "lydia/cmd"
 
 func main() {
-	env := goenv.NewOsEnvReader()
-
-	application, err := app.NewApp(env)
-	if err != nil {
-		panic(err)
-	}
-
-
-
-	panic(application.Run())
+	cmd.Execute()
 }
